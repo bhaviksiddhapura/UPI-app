@@ -6,9 +6,12 @@
   "main": "./src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "test": "node --test src/__tests__/*.test.js"
+    "test": "node --test src/__tests__/*.test.js netlify/__tests__/*.test.js"
   },
   "dependencies": {
-    "@youpi/common": "*"
+    "@neondatabase/serverless": "1.1.0"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

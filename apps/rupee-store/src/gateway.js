@@ -1,7 +1,14 @@
 import crypto from 'node:crypto';
-import { OrderStatus } from './orders.js';
+import { OrderStatus } from './status.js';
+import { formatRupees } from './product.js';
 
+const GATEWAY_TIMEOUT_MS = 10000;
 
+/**
+ * Talks to the YOUPI payment API with the merchant key. `gatewayApiUrl` is either the local API
+ * (http://127.0.0.1:6100) or the gateway's public tunnel address, whose checkout portal proxies
+ * /api/* to the same API.
+ */
 export class GatewayClient {
   constructor(config) {
     this.config = config;
@@ -20,14 +27,9 @@ export class GatewayClient {
     const res = await fetch(`${this.config.gatewayApiUrl}/api/v1/payments`, {
       method: 'POST',
       headers: this.headers({ 'Idempotency-Key': orderId }),
-      body: JSON.stringify({
-        orderId,
-        amount: (Number(amountPaise) / 100).toFixed(2),
-        currency,
-        returnUrl,
-        metadata
-      }),
-      signal: AbortSignal.timeout(10000)
+      body: JSON.stringify({ orderId, amount: formatRupees(amountPaise), currency, returnUrl, metadata }),
+      redirect: 'error',
+      signal: AbortSignal.timeout(GATEWAY_TIMEOUT_MS)
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -43,7 +45,8 @@ export class GatewayClient {
   async getPayment(paymentId) {
     const res = await fetch(`${this.config.gatewayApiUrl}/api/v1/payments/${encodeURIComponent(paymentId)}`, {
       headers: this.headers(),
-      signal: AbortSignal.timeout(10000)
+      redirect: 'error',
+      signal: AbortSignal.timeout(GATEWAY_TIMEOUT_MS)
     });
     if (!res.ok) throw new Error(`Gateway status read failed: HTTP ${res.status}`);
     return res.json();
@@ -61,40 +64,48 @@ export function deriveOrderStatus(order, gw) {
   if (gw.orderId !== order.id) return null;
   let gwPaise;
   try { gwPaise = BigInt(gw.amountPaise); } catch { return null; }
-  if (gwPaise !== order.amountPaise) return null;
+  if (gwPaise !== BigInt(order.amountPaise)) return null;
   if (String(gw.currency || '').toUpperCase() !== order.currency) return null;
 
+  const base = { gatewayStatus: String(gw.status || '') };
   switch (gw.status) {
     case 'OBSERVED_SUCCESS':
     case 'RECONCILED':
       // Only a UPI credit is money received; COD / counter events never mark an order paid.
       if (gw.method !== 'UPI') return null;
-      return { status: OrderStatus.PAID, settlementState: gw.settlementState || gw.status };
+      return { ...base, status: OrderStatus.PAID, settlementState: gw.settlementState || gw.status };
     case 'SUCCESS':
       // Cash on delivery / counter outcome: this store never offers those, so it is ignored.
       return null;
     case 'MANUAL_REVIEW':
-      return { status: OrderStatus.REVIEW, settlementState: 'MANUAL_REVIEW' };
+      return { ...base, status: OrderStatus.REVIEW, settlementState: 'MANUAL_REVIEW' };
     case 'FAILED':
-      return { status: OrderStatus.FAILED };
+      return { ...base, status: OrderStatus.FAILED };
     case 'EXPIRED':
-      return { status: OrderStatus.EXPIRED };
+      return { ...base, status: OrderStatus.EXPIRED };
     case 'CANCELLED':
-      return { status: OrderStatus.CANCELLED };
+      return { ...base, status: OrderStatus.CANCELLED };
     default:
-      return { status: OrderStatus.PENDING };
+      return { ...base, status: OrderStatus.PENDING };
   }
 }
 
+function headerValue(headers, name) {
+  if (typeof headers?.get === 'function') return headers.get(name) || '';
+  return headers?.[name] || '';
+}
+
 /**
- * Verifies a gateway webhook. Uses the timestamped V2 signature (HMAC over "<timestamp>.<raw body>")
- * so the timestamp cannot be swapped, and rejects deliveries outside the tolerance window.
- * The tolerance covers the gateway's retry schedule; exact replays are caught by delivery-id dedupe.
+ * Verifies an HMAC-SHA256 signature over "<timestamp>.<raw body>" (the gateway's V2 webhook
+ * scheme), so the timestamp cannot be swapped, and rejects messages outside the tolerance window.
+ * The default tolerance covers the gateway's webhook retry schedule; replays are harmless because
+ * processing is an idempotent, authenticated read-back.
+ * `headers` may be a plain object (node:http) or a Headers instance (fetch / Netlify).
  */
 export function verifyWebhookSignature(rawBody, headers, secret, { toleranceMs = 2 * 60 * 60 * 1000, now = Date.now() } = {}) {
   if (!secret) return { ok: false, reason: 'webhook secret not configured' };
-  const sigHeader = String(headers['x-gateway-signature-v2'] || '');
-  const timestamp = String(headers['x-gateway-timestamp'] || '');
+  const sigHeader = String(headerValue(headers, 'x-gateway-signature-v2'));
+  const timestamp = String(headerValue(headers, 'x-gateway-timestamp'));
   if (!sigHeader.startsWith('sha256=') || !/^\d{10,16}$/.test(timestamp)) {
     return { ok: false, reason: 'missing signature or timestamp' };
   }
@@ -102,10 +113,15 @@ export function verifyWebhookSignature(rawBody, headers, secret, { toleranceMs =
     return { ok: false, reason: 'timestamp outside tolerance' };
   }
   const expected = crypto.createHmac('sha256', secret).update(`${timestamp}.`).update(rawBody).digest();
-  let presented;
-  try { presented = Buffer.from(sigHeader.slice('sha256='.length), 'hex'); } catch { presented = Buffer.alloc(0); }
+  const presented = Buffer.from(sigHeader.slice('sha256='.length), 'hex');
   if (presented.length !== expected.length || !crypto.timingSafeEqual(presented, expected)) {
     return { ok: false, reason: 'bad signature' };
   }
   return { ok: true };
+}
+
+/** A 12-digit UPI reference number, or null. */
+export function cleanUtr(value) {
+  const utr = String(value ?? '').trim();
+  return /^\d{12}$/.test(utr) ? utr : null;
 }

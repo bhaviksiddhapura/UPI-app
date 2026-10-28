@@ -7,6 +7,10 @@
  *   - saves both to data/.secrets/rupee_store.json (gitignored, owner-only permissions)
  *
  * Usage: npm run store:configure -- --upi yourname@okhdfcbank [--name "Your Name"]
+ *
+ * Netlify-hosted store: add --store-url https://<site>.netlify.app --admin-token <STORE_ADMIN_TOKEN>.
+ * The webhook then points at the Netlify store and the fresh credentials are sent to it over HTTPS
+ * (authenticated with the admin token), so they never need to be copied by hand.
  * The gateway must be running (npm run dev / npm start) when you run this.
  */
 import fs from 'node:fs';
@@ -31,7 +35,24 @@ const payeeName = (arg('name') || process.env.MERCHANT_PAYEE_NAME || '').trim();
 const businessName = (arg('business') || process.env.MERCHANT_BUSINESS_NAME || 'One Rupee Store').trim();
 const apiUrl = (process.env.RUPEE_STORE_GATEWAY_API_URL || `http://127.0.0.1:${process.env.PAYMENT_API_PORT || 6100}`).replace(/\/+$/, '');
 const storePort = Number(process.env.RUPEE_STORE_PORT || 4000);
-const webhookUrl = process.env.RUPEE_STORE_WEBHOOK_URL || `http://127.0.0.1:${storePort}/api/webhook`;
+const storeUrl = (arg('store-url') || '').trim().replace(/\/+$/, '');
+const storeAdminToken = (arg('admin-token') || '').trim();
+const webhookUrl = process.env.RUPEE_STORE_WEBHOOK_URL
+  || (storeUrl ? `${storeUrl}/api/webhook` : `http://127.0.0.1:${storePort}/api/webhook`);
+
+if (storeUrl) {
+  let parsed;
+  try { parsed = new URL(storeUrl); } catch {}
+  const localTest = parsed && ['localhost', '127.0.0.1'].includes(parsed.hostname);
+  if (!parsed || (parsed.protocol !== 'https:' && !localTest)) {
+    console.error('--store-url must be the https:// address of your Netlify site');
+    process.exit(1);
+  }
+  if (storeAdminToken.length < 32) {
+    console.error('--admin-token is required with --store-url (the STORE_ADMIN_TOKEN of the Netlify site)');
+    process.exit(1);
+  }
+}
 
 if (!upiId || !isValidVpa(upiId)) {
   console.error('Give your UPI ID, for example:\n  npm run store:configure -- --upi yourname@okhdfcbank --name "Your Name"');
@@ -95,7 +116,13 @@ const secret = await call('POST', '/api/v1/admin/webhook-secret/rotate', {});
 const key = await call('POST', '/api/v1/admin/merchant-key/rotate', {});
 
 const merchantId = key.merchantId || secret.merchantId || settings.merchantId;
-const credentials = { merchantId, merchantKey: key.merchantKey, webhookSecret: secret.webhookSecret, updatedAt: new Date().toISOString() };
+const credentials = {
+  merchantId,
+  merchantKey: key.merchantKey,
+  webhookSecret: secret.webhookSecret,
+  ...(storeUrl ? { storeUrl, storeAdminToken } : {}),
+  updatedAt: new Date().toISOString()
+};
 if (!credentials.merchantId || !credentials.merchantKey || !credentials.webhookSecret) {
   console.error('Gateway did not return a complete credential set:', { merchantId, hasKey: Boolean(key.merchantKey), hasSecret: Boolean(secret.webhookSecret) });
   process.exit(1);
@@ -107,9 +134,32 @@ const file = path.join(secretsDir, 'rupee_store.json');
 fs.writeFileSync(file, JSON.stringify(credentials, null, 2), { mode: 0o600 });
 try { fs.chmodSync(file, 0o600); } catch {}
 
+if (storeUrl) {
+  // The previous key stopped working when it was rotated above, so the store must get the new one now.
+  let res;
+  try {
+    res = await fetch(`${storeUrl}/api/admin/link`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${storeAdminToken}` },
+      body: JSON.stringify({ merchantId, merchantKey: credentials.merchantKey, webhookSecret: credentials.webhookSecret }),
+      signal: AbortSignal.timeout(20000)
+    });
+  } catch (err) {
+    console.error(`Could not reach the store at ${storeUrl} (${err.message}). Run this command again once it is reachable.`);
+    process.exit(1);
+  }
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    console.error(`The store refused the link (HTTP ${res.status}): ${body.error || 'unknown error'}. Fix that and run this command again.`);
+    process.exit(1);
+  }
+  console.log(`\n✔ Netlify store ${storeUrl} received the new merchant credentials`);
+  if (!body.linked) console.log(`  ${body.reason} Start the public tunnel next: npm run observer:tunnel`);
+}
+
 const upi = await call('GET', '/api/v1/admin/upi-settings');
 console.log('\n✔ Store connected to the gateway');
 console.log(`  Receiving UPI ID : ${upi.upiId} (${upi.payeeName})`);
 console.log(`  Webhook URL      : ${webhookUrl}`);
 console.log(`  Credentials      : ${path.relative(rootDir, file)} (keep this file private)`);
-console.log('\nThe store picks up the new credentials automatically; no restart needed.');
+if (!storeUrl) console.log('\nThe store picks up the new credentials automatically; no restart needed.');

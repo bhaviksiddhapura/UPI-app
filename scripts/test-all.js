@@ -23,6 +23,7 @@ const testFiles = [
   'apps/checkout-portal/src/__tests__/checkout-xss.test.js',
   'apps/coin-wallet-store/src/__tests__/coin-wallet-store.test.js',
   'apps/rupee-store/src/__tests__/rupee-store.test.js',
+  'apps/rupee-store/netlify/__tests__/functions.test.js',
   'apps/merchant-admin/src/__tests__/merchant-admin.test.js',
   'apps/payment-help/src/__tests__/payment-help.test.js',
   'apps/gmail-observer/src/__tests__/gmail-poller-stop-race.test.js',

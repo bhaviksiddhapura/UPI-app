@@ -56,6 +56,7 @@
 
   async function watchOrder(orderId) {
     let delay = 2000;
+    let paidPolls = 0;
     for (let i = 0; i < 400; i += 1) {
       try {
         const res = await fetch(`/api/orders/${encodeURIComponent(orderId)}`, { cache: 'no-store' });
@@ -66,7 +67,12 @@
         if (res.ok) {
           const order = await res.json();
           render(order);
-          if (FINAL.has(order.status)) return;
+          // The bank reference (UTR) can land a moment after PAID; keep looking briefly for it.
+          if (order.status === 'PAID' && !order.utr && paidPolls < 10) {
+            paidPolls += 1;
+          } else if (FINAL.has(order.status)) {
+            return;
+          }
         }
       } catch {}
       await new Promise(r => setTimeout(r, delay));
@@ -82,7 +88,10 @@
   const orderId = new URLSearchParams(window.location.search).get('order');
   if (orderId && /^R1-[A-Za-z0-9_-]{22}$/.test(orderId)) watchOrder(orderId);
 
-  fetch('/api/product').then(r => r.json()).then(p => {
-    if (!p.ready) showError('This store is not connected to the payment gateway yet.');
+  fetch('/api/product', { cache: 'no-store' }).then(r => r.json()).then(p => {
+    if (p.name) $('productName').textContent = p.name;
+    if (p.description) $('productDescription').textContent = p.description;
+    if (p.amount) $('productPrice').textContent = p.amount;
+    if (!p.ready) showError(p.notReadyReason || 'This store is not connected to the payment gateway yet.');
   }).catch(() => {});
 })();

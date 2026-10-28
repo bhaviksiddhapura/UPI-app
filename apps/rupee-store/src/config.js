@@ -8,14 +8,7 @@ export const ROOT_DIR = path.resolve(__dirname, '../../..');
 /** Credentials written by `npm run store:configure` (data/.secrets is gitignored). */
 export const CREDENTIALS_FILE = path.join(ROOT_DIR, 'data', '.secrets', 'rupee_store.json');
 
-/** The only thing this store sells. Price lives on the server and is never read from a request. */
-export const PRODUCT = Object.freeze({
-  sku: 'RUPEE-1',
-  name: process.env.STORE_PRODUCT_NAME || 'Lucky One Rupee Pass',
-  description: process.env.STORE_PRODUCT_DESCRIPTION || 'A tiny digital thank-you, paid by UPI straight to the merchant bank account.',
-  amountPaise: 100n,
-  currency: 'INR'
-});
+export { PRODUCT } from './product.js';
 
 function readCredentialsFile() {
   try {

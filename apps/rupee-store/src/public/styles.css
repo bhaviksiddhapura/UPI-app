@@ -30,6 +30,9 @@
 
 * { box-sizing: border-box; }
 
+/* Elements toggled with the hidden attribute must stay hidden whatever display their class sets. */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   background: var(--bg);

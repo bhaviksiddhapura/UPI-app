@@ -2,17 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-/** Store-side order states. Only the gateway (verified server-side) can move an order to PAID. */
-export const OrderStatus = Object.freeze({
-  PENDING: 'PENDING',
-  PAID: 'PAID',
-  REVIEW: 'REVIEW',
-  FAILED: 'FAILED',
-  EXPIRED: 'EXPIRED',
-  CANCELLED: 'CANCELLED'
-});
+import { OrderStatus, nextStatus } from './status.js';
 
-const FINAL = new Set([OrderStatus.PAID, OrderStatus.FAILED, OrderStatus.EXPIRED, OrderStatus.CANCELLED]);
+export { OrderStatus };
 
 export class OrderStore {
   constructor(dbPath) {
@@ -39,6 +31,8 @@ export class OrderStore {
         event TEXT,
         received_at TEXT NOT NULL
       );
+      -- One bank credit (UTR) can only ever pay one order.
+      CREATE UNIQUE INDEX IF NOT EXISTS orders_utr_unique ON orders(utr) WHERE utr IS NOT NULL;
     `);
   }
 
@@ -79,32 +73,38 @@ export class OrderStore {
   }
 
   /**
-   * Moves an order to a new state. A final state is never left again, so a late or replayed
-   * FAILED/EXPIRED event cannot undo a PAID order, and nothing can turn a FAILED order into PAID
-   * except a fresh, verified gateway read (handled by the caller before calling this).
+   * Applies a gateway-derived status (see nextStatus for the rules) and, for a paid order, records
+   * the settlement state and UTR. Returns the updated order.
    */
   transition(id, status, { settlementState = null, utr = null } = {}) {
     const order = this.get(id);
     if (!order) return null;
     const now = new Date().toISOString();
-    if (order.status === OrderStatus.PAID) {
-      // Allow enriching a paid order (UTR arrives with the webhook, RECONCILED arrives later).
+    const target = nextStatus(order.status, status);
+    if (target) {
       this.db.prepare(`
-        UPDATE orders SET utr = COALESCE(utr, ?), settlement_state = COALESCE(?, settlement_state), updated_at = ?
-        WHERE id = ?
-      `).run(utr, settlementState, now, id);
-      return this.get(id);
+        UPDATE orders SET status = ?, settlement_state = COALESCE(?, settlement_state),
+          paid_at = CASE WHEN ? = 'PAID' THEN ? ELSE paid_at END, updated_at = ?
+        WHERE id = ? AND status = ?
+      `).run(target, settlementState, target, now, now, id, order.status);
+    } else if (order.status === OrderStatus.PAID && settlementState) {
+      this.db.prepare('UPDATE orders SET settlement_state = ?, updated_at = ? WHERE id = ?').run(settlementState, now, id);
     }
-    if (FINAL.has(order.status) && status !== OrderStatus.PAID) return order;
-    this.db.prepare(`
-      UPDATE orders SET status = ?, settlement_state = COALESCE(?, settlement_state), utr = COALESCE(?, utr),
-        paid_at = CASE WHEN ? = 'PAID' THEN ? ELSE paid_at END, updated_at = ?
-      WHERE id = ?
-    `).run(status, settlementState, utr, status, now, now, id);
+    if (utr && (target === OrderStatus.PAID || order.status === OrderStatus.PAID)) {
+      try {
+        this.db.prepare('UPDATE orders SET utr = ?, updated_at = ? WHERE id = ? AND utr IS NULL').run(utr, now, id);
+      } catch (err) {
+        console.warn(`[Rupee Store] UTR ${utr} is already recorded on another order; not reusing it for ${id}.`);
+      }
+    }
     return this.get(id);
   }
 
-  /** Returns false when this webhook delivery id was already processed (replay / retry). */
+  hasDelivery(deliveryId) {
+    return Boolean(this.db.prepare('SELECT 1 FROM webhook_deliveries WHERE delivery_id = ?').get(deliveryId));
+  }
+
+  /** Marks a webhook delivery as processed. Returns false when it already was. */
   recordDelivery(deliveryId, orderId, event) {
     const result = this.db.prepare(`
       INSERT OR IGNORE INTO webhook_deliveries (delivery_id, order_id, event, received_at) VALUES (?, ?, ?, ?)

@@ -3,9 +3,10 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadConfig, isConfigured, PRODUCT, CREDENTIALS_FILE } from './config.js';
+import { loadConfig, isConfigured, CREDENTIALS_FILE } from './config.js';
+import { PRODUCT, ORDER_ID_RE, formatRupees } from './product.js';
 import { OrderStore, OrderStatus } from './orders.js';
-import { GatewayClient, deriveOrderStatus, verifyWebhookSignature } from './gateway.js';
+import { GatewayClient, deriveOrderStatus, verifyWebhookSignature, cleanUtr } from './gateway.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -16,7 +17,6 @@ const STATIC_FILES = {
   '/styles.css': ['styles.css', 'text/css; charset=utf-8']
 };
 const MAX_BODY_BYTES = 64 * 1024;
-const ORDER_ID_RE = /^R1-[A-Za-z0-9_-]{22}$/;
 const SYNC_INTERVAL_MS = 3000;
 
 function securityHeaders(publicUrl) {
@@ -74,7 +74,7 @@ function publicOrder(order) {
   return {
     orderId: order.id,
     product: PRODUCT.name,
-    amount: (Number(order.amountPaise) / 100).toFixed(2),
+    amount: formatRupees(order.amountPaise),
     currency: order.currency,
     status: order.status,
     settlementState: order.settlementState,
@@ -127,7 +127,11 @@ export class RupeeStoreServer {
     return allowed.has(origin);
   }
 
-  async syncFromGateway(order, { force = false } = {}) {
+  /**
+   * Refreshes an order from an authenticated gateway read. With `throwOnError` a failed read
+   * throws, so a webhook can answer non-2xx and the gateway retries it.
+   */
+  async syncFromGateway(order, { force = false, throwOnError = false } = {}) {
     if (!order?.paymentId || (order.status === OrderStatus.PAID && order.settlementState === 'RECONCILED')) return order;
     const last = this.lastSync.get(order.id) || 0;
     if (!force && Date.now() - last < SYNC_INTERVAL_MS) return order;
@@ -148,6 +152,7 @@ export class RupeeStoreServer {
       }
     } catch (err) {
       console.warn(`[Rupee Store] Could not refresh ${order.id} from gateway: ${err.message}`);
+      if (throwOnError) throw err;
     }
     return this.orders.get(order.id);
   }
@@ -233,29 +238,30 @@ export class RupeeStoreServer {
       this.send(res, 200, { received: true, ignored: true });
       return;
     }
-    if (deliveryId && !this.orders.recordDelivery(deliveryId, order.id, String(payload.event || ''))) {
+    if (deliveryId && this.orders.hasDelivery(deliveryId)) {
       this.send(res, 200, { received: true, duplicate: true });
       return;
     }
 
     // The signed webhook tells us *when* to look; the authoritative gateway read decides *what* happened.
-    order = await this.syncFromGateway(order, { force: true });
-    if (order.status === OrderStatus.PAID && /^\d{12}$/.test(String(payload.utr || ''))) {
-      order = this.orders.transition(order.id, OrderStatus.PAID, { utr: String(payload.utr) });
+    try {
+      order = await this.syncFromGateway(order, { force: true, throwOnError: true });
+    } catch {
+      // Not recorded as processed, so the gateway's retry gets a second chance.
+      this.send(res, 503, { error: 'Gateway read-back failed; retry later' });
+      return;
     }
+    const utr = cleanUtr(payload.utr);
+    if (order.status === OrderStatus.PAID && utr) {
+      order = this.orders.transition(order.id, OrderStatus.PAID, { utr });
+    }
+    if (deliveryId) this.orders.recordDelivery(deliveryId, order.id, String(payload.event || ''));
     this.send(res, 200, { received: true, status: order.status });
   }
 
   serveStatic(res, pathname) {
     const [file, type] = STATIC_FILES[pathname];
-    let body = fs.readFileSync(path.join(PUBLIC_DIR, file));
-    if (file === 'index.html') {
-      const price = (Number(PRODUCT.amountPaise) / 100).toFixed(2);
-      body = Buffer.from(body.toString('utf8')
-        .replaceAll('{{PRODUCT_NAME}}', escapeHtml(PRODUCT.name))
-        .replaceAll('{{PRODUCT_DESCRIPTION}}', escapeHtml(PRODUCT.description))
-        .replaceAll('{{PRICE}}', price));
-    }
+    const body = fs.readFileSync(path.join(PUBLIC_DIR, file));
     res.writeHead(200, { ...this.headers, 'Content-Type': type, 'Cache-Control': 'no-cache' });
     res.end(body);
   }
@@ -280,7 +286,8 @@ export class RupeeStoreServer {
           this.send(res, 200, {
             sku: PRODUCT.sku,
             name: PRODUCT.name,
-            amount: (Number(PRODUCT.amountPaise) / 100).toFixed(2),
+            description: PRODUCT.description,
+            amount: formatRupees(PRODUCT.amountPaise),
             currency: PRODUCT.currency,
             ready: isConfigured(this.config)
           });
@@ -306,8 +313,4 @@ export class RupeeStoreServer {
       }
     });
   }
-}
-
-function escapeHtml(value) {
-  return String(value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 }

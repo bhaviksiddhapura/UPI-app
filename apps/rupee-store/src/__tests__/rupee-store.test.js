@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import http from 'node:http';
-import { OrderStore, OrderStatus } from '../orders.js';
+import { OrderStore } from '../orders.js';
+import { OrderStatus, nextStatus } from '../status.js';
 import { deriveOrderStatus, verifyWebhookSignature } from '../gateway.js';
 import { RupeeStoreServer } from '../server.js';
 
@@ -38,7 +39,7 @@ test('webhook signature: wrong secret, tampered body and stale timestamp are rej
 });
 
 test('gateway status: UPI observed success marks the order paid', () => {
-  assert.deepEqual(deriveOrderStatus(order(), gw()), { status: OrderStatus.PAID, settlementState: 'NOT_RECONCILED' });
+  assert.deepEqual(deriveOrderStatus(order(), gw()), { gatewayStatus: 'OBSERVED_SUCCESS', status: OrderStatus.PAID, settlementState: 'NOT_RECONCILED' });
   assert.equal(deriveOrderStatus(order(), gw({ status: 'RECONCILED', settlementState: 'RECONCILED' })).status, OrderStatus.PAID);
 });
 
@@ -154,5 +155,58 @@ test('store: forged webhook is rejected and a genuine one is re-verified against
     const view = await (await fetch(`${base}/api/orders/${orderId}`)).json();
     assert.equal(view.status, 'PAID');
     assert.equal(view.utr, '123456789012');
+  });
+});
+
+test('status rules: PAID is final, nothing returns to PENDING, late credits can still resolve', () => {
+  assert.equal(nextStatus('PENDING', 'PAID'), 'PAID');
+  assert.equal(nextStatus('PAID', 'FAILED'), null);
+  assert.equal(nextStatus('PAID', 'REVIEW'), null);
+  assert.equal(nextStatus('FAILED', 'PENDING'), null);
+  assert.equal(nextStatus('EXPIRED', 'REVIEW'), 'REVIEW');
+  assert.equal(nextStatus('FAILED', 'PAID'), 'PAID');
+  assert.equal(nextStatus('PENDING', 'BOGUS'), null);
+});
+
+test('orders: one UTR can never pay two orders', () => {
+  const store = new OrderStore(':memory:');
+  for (const id of ['R1-a', 'R1-b']) {
+    store.create({ id, sku: 'RUPEE-1', amountPaise: 100n, currency: 'INR' });
+    store.attachPayment(id, `pay-${id}`);
+  }
+  store.transition('R1-a', OrderStatus.PAID, { utr: '111122223333' });
+  store.transition('R1-b', OrderStatus.PAID, { utr: '111122223333' });
+  assert.equal(store.get('R1-a').utr, '111122223333');
+  assert.equal(store.get('R1-b').utr, null);
+  store.close();
+});
+
+test('store: webhook answers 503 (so the gateway retries) when the read-back fails', async () => {
+  let orderId;
+  let failRead = true;
+  await withStore((req, res) => {
+    if (req.method === 'POST') {
+      let body = '';
+      req.on('data', c => { body += c; });
+      req.on('end', () => {
+        orderId = JSON.parse(body).orderId;
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ paymentId: 'pay-5', checkoutUrl: 'http://localhost:7000/checkout/pay-5' }));
+      });
+      return;
+    }
+    if (failRead) { res.writeHead(502); res.end(); return; }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ paymentId: 'pay-5', orderId, amountPaise: '100', currency: 'INR', status: 'OBSERVED_SUCCESS', method: 'UPI' }));
+  }, async (base, store) => {
+    await fetch(`${base}/api/orders`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const payload = JSON.stringify({ event: 'OBSERVED_SUCCESS', orderId, paymentId: 'pay-5', utr: '999988887777' });
+    const headers = { 'Content-Type': 'application/json', 'x-gateway-delivery-id': 'd-9' };
+    const first = await fetch(`${base}/api/webhook`, { method: 'POST', headers: { ...headers, ...sign(payload) }, body: payload });
+    assert.equal(first.status, 503);
+    failRead = false;
+    store.lastSync.clear();
+    const retry = await fetch(`${base}/api/webhook`, { method: 'POST', headers: { ...headers, ...sign(payload) }, body: payload });
+    assert.equal((await retry.json()).status, 'PAID');
   });
 });

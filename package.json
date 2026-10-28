@@ -15,6 +15,7 @@
     "store:configure": "node scripts/configure-store.js",
     "observer:pair": "node scripts/observer-pairing.js",
     "observer:tunnel": "node scripts/observer-tunnel.js",
+    "store:netlify-dev": "node apps/rupee-store/netlify/dev-server.mjs",
     "sync:package": "node scripts/sync-package.cjs",
     "start": "node scripts/start.js",
     "start:prod": "node scripts/start.js",

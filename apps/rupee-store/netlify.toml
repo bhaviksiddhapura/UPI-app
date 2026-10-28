@@ -1,0 +1,30 @@
+# Netlify site for the One Rupee Store (base directory: apps/rupee-store).
+# API routes are Netlify Functions in netlify/functions (each declares its own path).
+# Required environment variables (Functions scope): DATABASE_URL, STORE_ADMIN_TOKEN, STORE_ENCRYPTION_KEY.
+
+[build]
+  publish = "src/public"
+  functions = "netlify/functions"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[functions]
+  node_bundler = "esbuild"
+
+# Static pages only; function responses set their own headers in code.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "no-referrer"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+    Strict-Transport-Security = "max-age=31536000"
+
+[[headers]]
+  for = "/admin*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "no-store"

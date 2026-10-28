@@ -54,14 +54,16 @@ const payload = JSON.stringify({
   expiresAt
 });
 
-// Make sure the phone will actually reach the gateway through this address.
+// Make sure the phone will actually reach the payment API through this address.
 try {
-  const res = await fetch(`${serverUrl}/health`, { signal: AbortSignal.timeout(8000) });
+  const res = await fetch(`${serverUrl}/api/v1/payments/${crypto.randomUUID()}`, { signal: AbortSignal.timeout(8000) });
   const body = await res.json().catch(() => ({}));
-  if (body.service !== 'payment-api') throw new Error(`answered, but not as the payment API (${res.status})`);
+  if (res.status !== 404 || !String(body.error || '').startsWith('Payment session not found')) {
+    throw new Error(`answered, but not as the payment API (HTTP ${res.status})`);
+  }
   console.log(`✔ ${serverUrl} reaches the payment API`);
 } catch (err) {
-  console.warn(`! Could not reach the payment API at ${serverUrl}/health (${err.message}). Check the tunnel points at http://localhost:6100.`);
+  console.warn(`! Could not reach the payment API through ${serverUrl} (${err.message}). Check the tunnel points at http://localhost:7000.`);
 }
 
 const html = `<!doctype html>
