@@ -80,3 +80,6 @@ build/
 
 # Netlify CLI link state
 .netlify/
+
+# Vercel CLI link state
+.vercel/

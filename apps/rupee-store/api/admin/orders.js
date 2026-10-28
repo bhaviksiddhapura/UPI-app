@@ -1,11 +1,11 @@
-import { getSql, json, isAdmin, gatewayConfig, syncOpenOrders, mapOrder, formatRupees, q } from '../lib/store.mjs';
+import { route, getSql, json, isAdmin, gatewayConfig, syncOpenOrders, mapOrder, formatRupees, q } from '../../lib/store.js';
 
 /**
- * Live dashboard feed (polled every couple of seconds by /admin.html). Before answering it refreshes
+ * GET /api/admin/orders — live dashboard feed (polled every couple of seconds by /admin.html). Before answering it refreshes
  * a few open orders from the gateway, so the table stays correct even when no customer page is open.
  */
-export default async req => {
-  if (!isAdmin(req)) return json(401, { error: 'Unauthorized' });
+export default route('GET', async request => {
+  if (!isAdmin(request)) return json(401, { error: 'Unauthorized' });
   const sql = getSql();
   const link = await gatewayConfig(sql);
   if (link.ready) await syncOpenOrders(sql, link.cfg, { limit: 5, budgetMs: 6000 });
@@ -60,6 +60,4 @@ export default async req => {
       at: new Date(e.created_at).toISOString()
     }))
   });
-};
-
-export const config = { path: '/api/admin/orders', method: 'GET' };
+});

@@ -1,6 +1,7 @@
-import { getSql, json, gatewayConfig } from '../lib/store.mjs';
+import { route, getSql, json, gatewayConfig } from '../lib/store.js';
 
-export default async () => {
+/** GET /api/health — database reachable and gateway linked (no secrets). */
+export default route('GET', async () => {
   try {
     const link = await gatewayConfig(getSql());
     return json(200, { status: 'UP', database: 'ok', gatewayLinked: link.ready });
@@ -8,6 +9,4 @@ export default async () => {
     console.error('[health]', err.message);
     return json(503, { status: 'DEGRADED', database: 'error' });
   }
-};
-
-export const config = { path: '/api/health', method: 'GET' };
+});

@@ -1,5 +1,5 @@
 /**
- * Integration tests for the Netlify functions against a real Postgres (use a Neon test branch).
+ * Integration tests for the Vercel functions in api/ against a real Postgres (use a Neon test branch).
  * Skipped unless TEST_DATABASE_URL is set. The tables in that database are emptied first, so
  * never point it at production.
  */
@@ -22,15 +22,9 @@ let sql;
 let gateway;
 const gw = { payments: new Map(), failReads: false, refuseCreate: null };
 
-function req(path, { method = 'GET', headers = {}, body, ip = '203.0.113.7' } = {}) {
-  const request = new Request(`https://store.example${path}`, { method, headers, body });
-  return { request, context: { ip, site: { url: 'https://store.example' }, params: {} } };
-}
-
-async function call(fn, path, opts = {}, params = {}) {
-  const { request, context } = req(path, opts);
-  context.params = params;
-  const res = await fn(request, context);
+async function call(fn, path, { method = 'GET', headers = {}, body, ip = '203.0.113.7' } = {}) {
+  const request = new Request(`https://store.example${path}`, { method, headers: { 'x-real-ip': ip, ...headers }, body });
+  const res = await fn.fetch(request);
   return { status: res.status, body: await res.json() };
 }
 
@@ -56,7 +50,7 @@ before(async () => {
   process.env.DATABASE_URL = TEST_DB;
   process.env.STORE_ADMIN_TOKEN = ADMIN;
   process.env.STORE_ENCRYPTION_KEY = crypto.randomBytes(32).toString('hex');
-  process.env.URL = 'https://store.example';
+  process.env.STORE_PUBLIC_URL = 'https://store.example';
 
   // A stand-in for the YOUPI payment API (create + authenticated read-back).
   gateway = http.createServer((r, s) => {
@@ -81,14 +75,15 @@ before(async () => {
   });
   await new Promise(r => gateway.listen(0, '127.0.0.1', r));
 
-  lib = await import('../lib/store.mjs');
+  lib = await import('../lib/store.js');
   fns = {
-    create: (await import('../functions/orders-create.mjs')).default,
-    get: (await import('../functions/order-get.mjs')).default,
-    webhook: (await import('../functions/webhook.mjs')).default,
-    adminOrders: (await import('../functions/admin-orders.mjs')).default,
-    adminLink: (await import('../functions/admin-link.mjs')).default,
-    product: (await import('../functions/product.mjs')).default
+    create: (await import('../api/orders/index.js')).default,
+    get: (await import('../api/orders/[id].js')).default,
+    webhook: (await import('../api/webhook.js')).default,
+    adminOrders: (await import('../api/admin/orders.js')).default,
+    adminLink: (await import('../api/admin/link.js')).default,
+    adminSync: (await import('../api/admin/sync.js')).default,
+    product: (await import('../api/product.js')).default
   };
   sql = lib.getSql();
   for (const t of ['order_events', 'webhook_deliveries', 'orders', 'settings']) await lib.q(sql, `DELETE FROM ${t}`);
@@ -131,7 +126,7 @@ test('a signed webhook only marks paid what the gateway itself reports as paid',
   gw.payments.get(o.paymentId).settlementState = 'NOT_RECONCILED';
   res = await call(fns.webhook, '/api/webhook', signed({ event: 'OBSERVED_SUCCESS', orderId: o.orderId, paymentId: o.paymentId, utr: '555566667777' }));
   assert.equal(res.body.status, 'PAID');
-  const view = await call(fns.get, `/api/orders/${o.orderId}`, {}, { id: o.orderId });
+  const view = await call(fns.get, `/api/orders/${o.orderId}`);
   assert.equal(view.body.status, 'PAID');
   assert.equal(view.body.utr, '555566667777');
 });
@@ -234,8 +229,8 @@ test('admin link validates input and refuses plain-http gateways', { skip }, asy
 });
 
 test('unknown or malformed order ids return 404', { skip }, async () => {
-  assert.equal((await call(fns.get, '/api/orders/x', {}, { id: "R1-'; DROP TABLE orders;--" })).status, 404);
-  assert.equal((await call(fns.get, '/api/orders/x', {}, { id: 'R1-AAAAAAAAAAAAAAAAAAAAAA' })).status, 404);
+  assert.equal((await call(fns.get, `/api/orders/${encodeURIComponent("R1-'; DROP TABLE orders;--")}`)).status, 404);
+  assert.equal((await call(fns.get, '/api/orders/R1-AAAAAAAAAAAAAAAAAAAAAA')).status, 404);
 });
 
 test('settings encrypted with another key read as "not linked" instead of crashing', { skip }, async () => {
@@ -250,4 +245,20 @@ test('settings encrypted with another key read as "not linked" instead of crashi
   } finally {
     process.env.STORE_ENCRYPTION_KEY = saved;
   }
+});
+
+test('wrong HTTP methods are refused', { skip }, async () => {
+  assert.equal((await call(fns.create, '/api/orders')).status, 405);
+  assert.equal((await call(fns.webhook, '/api/webhook')).status, 405);
+});
+
+test('admin sync refreshes open orders and requires the token', { skip }, async () => {
+  assert.equal((await call(fns.adminSync, '/api/admin/sync', { method: 'POST' })).status, 401);
+  const o = await newOrder();
+  gw.payments.get(o.paymentId).status = 'EXPIRED';
+  await lib.q(sql, 'UPDATE orders SET last_synced_at = NULL WHERE id = $1', [o.orderId]);
+  const r = await call(fns.adminSync, '/api/admin/sync', { method: 'POST', headers: { authorization: `Bearer ${ADMIN}` } });
+  assert.equal(r.status, 200);
+  assert.ok(r.body.checked >= 1);
+  assert.equal((await lib.getOrder(sql, o.orderId)).status, 'EXPIRED');
 });

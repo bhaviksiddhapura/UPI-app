@@ -44,14 +44,20 @@ if ($LASTEXITCODE -ne 0 -or -not (Test-Path 'node_modules\@youpi\common')) {
 }
 if (-not (Test-Path '.env')) { Copy-Item '.env.example' '.env' }
 
-# 3. Your receiving UPI ID
+# 3. Your receiving UPI ID and (optionally) the online store on Vercel
 $credFile = 'data\.secrets\rupee_store.json'
 $upi = $null
+$storeArgs = @()
 if (-not (Test-Path $credFile)) {
   $upi = Read-Host 'Your UPI ID that should receive the money (e.g. yourname@okhdfcbank)'
   $payee = Read-Host 'Name shown to payers (your name or shop name)'
+  $storeUrl = Read-Host 'Online store address, e.g. https://your-project.vercel.app (press Enter to run the store only on this PC)'
+  if ($storeUrl) {
+    $storeToken = Read-Host 'STORE_ADMIN_TOKEN of the online store (from whoever deployed it)'
+    $storeArgs = @('--store-url', $storeUrl.Trim(), '--admin-token', $storeToken.Trim())
+  }
   # Brings .env up to the hardened settings before the gateway starts (no gateway needed for this part).
-  node scripts/configure-store.js --upi $upi --name $payee | Out-Null
+  node scripts/configure-store.js --upi $upi --name $payee @storeArgs | Out-Null
 }
 
 # 4. Start the gateway in its own window
@@ -70,9 +76,17 @@ if (-not $ok) { Write-Host 'The gateway did not come up in 60 seconds. Check the
 
 # 5. Connect the store to the gateway (UPI ID, webhook, fresh merchant key + webhook secret)
 if ($upi) {
-  node scripts/configure-store.js --upi $upi --name $payee
+  node scripts/configure-store.js --upi $upi --name $payee @storeArgs
   if ($LASTEXITCODE -ne 0) { Write-Host 'Connecting the store failed, see the message above.' -ForegroundColor Red; return }
 }
+
+# 6. Public address for customers and the phone (needed for the online store and for pairing)
+if (-not (Get-Command cloudflared -ErrorAction SilentlyContinue)) {
+  Write-Host 'Installing cloudflared (gives this PC a secure public address)...'
+  winget install -e --id Cloudflare.cloudflared --accept-source-agreements --accept-package-agreements
+  $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+}
+Start-Process powershell -ArgumentList '-NoExit', '-Command', "Set-Location '$dir'; npm run observer:tunnel"
 
 Start-Process 'http://localhost:4000'
 Start-Process 'http://localhost:6001'
@@ -80,6 +94,8 @@ Write-Host ''
 Write-Host 'Store:        http://localhost:4000' -ForegroundColor Green
 Write-Host 'Admin panel:  http://localhost:6001' -ForegroundColor Green
 Write-Host ''
-Write-Host 'Before a live payment works you still need (see docs\RUPEE_STORE.md):'
+Write-Host 'Keep the two new windows (gateway and tunnel) open while you accept payments.'
+Write-Host 'Before a live payment works you still need (see HANDOFF.md, Part B):'
 Write-Host '  1. Admin panel > Developer & Infrastructure Hub > Gmail & WhatsApp Protocols: link WhatsApp (customer OTP).'
-Write-Host '  2. Phone observer: run  npm run observer:tunnel  in a new window and pair the app on your phone.'
+Write-Host '  2. Install apps\android-observer-app\youpi-sms-gateway.apk on the phone that gets your bank alerts and'
+Write-Host '     scan the QR in data\observer-pairing.html (written by the tunnel window).'

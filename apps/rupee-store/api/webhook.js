@@ -1,17 +1,17 @@
-import { verifyWebhookSignature } from '../../src/gateway.js';
-import { getSql, gatewayConfig, json, getOrder, syncOrder, recordUtr, addEvent, q } from '../lib/store.mjs';
+import { verifyWebhookSignature } from '../src/gateway.js';
+import { route, getSql, gatewayConfig, json, getOrder, syncOrder, recordUtr, addEvent, q } from '../lib/store.js';
 
 /**
- * Gateway webhook. The signature proves the message came from our gateway; the order is then
- * updated only from an authenticated read-back, never from the webhook body itself.
+ * POST /api/webhook — gateway webhook. The signature proves the message came from our gateway;
+ * the order is then updated only from an authenticated read-back, never from the webhook body.
  */
-export default async req => {
-  const raw = Buffer.from(await req.arrayBuffer());
+export default route('POST', async request => {
+  const raw = Buffer.from(await request.arrayBuffer());
   if (raw.length > 64 * 1024) return json(413, { error: 'Payload too large' });
 
   const sql = getSql();
   const { cfg } = await gatewayConfig(sql);
-  const check = verifyWebhookSignature(raw, req.headers, cfg.webhookSecret);
+  const check = verifyWebhookSignature(raw, request.headers, cfg.webhookSecret);
   if (!check.ok) {
     console.warn(`[webhook] rejected: ${check.reason}`);
     return json(401, { error: 'Invalid webhook signature' });
@@ -30,7 +30,7 @@ export default async req => {
     return json(200, { received: true, ignored: true });
   }
 
-  const deliveryId = String(req.headers.get('x-gateway-delivery-id') || payload.deliveryId || '').slice(0, 100);
+  const deliveryId = String(request.headers.get('x-gateway-delivery-id') || payload.deliveryId || '').slice(0, 100);
   if (deliveryId) {
     const seen = await q(sql, 'SELECT 1 FROM webhook_deliveries WHERE delivery_id = $1', [deliveryId]);
     if (seen.length) return json(200, { received: true, duplicate: true });
@@ -52,6 +52,4 @@ export default async req => {
   }
   await addEvent(sql, order.id, 'WEBHOOK', { detail: `${event} (now ${order.status})` });
   return json(200, { received: true, status: order.status });
-};
-
-export const config = { path: '/api/webhook', method: 'POST' };
+});

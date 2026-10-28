@@ -1,6 +1,7 @@
-import { getSql, gatewayConfig, json, PRODUCT, formatRupees } from '../lib/store.mjs';
+import { route, getSql, gatewayConfig, json, PRODUCT, formatRupees } from '../lib/store.js';
 
-export default async () => {
+/** GET /api/product — product info and whether customers can pay right now. */
+export default route('GET', async () => {
   let ready = false;
   let notReadyReason = 'The store is temporarily unavailable.';
   try {
@@ -19,6 +20,4 @@ export default async () => {
     ready,
     notReadyReason: ready ? null : notReadyReason
   });
-};
-
-export const config = { path: '/api/product', method: 'GET' };
+});

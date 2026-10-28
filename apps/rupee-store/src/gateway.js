@@ -100,7 +100,7 @@ function headerValue(headers, name) {
  * scheme), so the timestamp cannot be swapped, and rejects messages outside the tolerance window.
  * The default tolerance covers the gateway's webhook retry schedule; replays are harmless because
  * processing is an idempotent, authenticated read-back.
- * `headers` may be a plain object (node:http) or a Headers instance (fetch / Netlify).
+ * `headers` may be a plain object (node:http) or a Headers instance (fetch / Vercel).
  */
 export function verifyWebhookSignature(rawBody, headers, secret, { toleranceMs = 2 * 60 * 60 * 1000, now = Date.now() } = {}) {
   if (!secret) return { ok: false, reason: 'webhook secret not configured' };

@@ -1,4 +1,4 @@
-import { getSql, json, isAdmin, saveSetting, gatewayConfig } from '../lib/store.mjs';
+import { route, getSql, json, isAdmin, saveSetting, gatewayConfig } from '../../lib/store.js';
 
 const MERCHANT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MERCHANT_KEY_RE = /^mk_live_[0-9a-f]{48}$/;
@@ -35,14 +35,14 @@ async function probeGateway(gatewayUrl, merchantId, merchantKey) {
 }
 
 /**
- * Called from the merchant's PC (npm run store:link / npm run observer:tunnel) with the admin
- * token: stores the merchant credentials (encrypted) and the gateway's current public address.
+ * POST /api/admin/link — called from the merchant's PC (npm run store:configure / observer:tunnel)
+ * with the admin token: stores the merchant credentials (encrypted) and the gateway's public address.
  */
-export default async req => {
-  if (!isAdmin(req)) return json(401, { error: 'Unauthorized' });
+export default route('POST', async request => {
+  if (!isAdmin(request)) return json(401, { error: 'Unauthorized' });
   let body;
   try {
-    body = await req.json();
+    body = await request.json();
   } catch {
     return json(400, { error: 'Invalid JSON' });
   }
@@ -78,6 +78,4 @@ export default async req => {
   for (const [key, value] of Object.entries(updates)) await saveSetting(sql, key, value);
   const after = await gatewayConfig(sql);
   return json(200, { linked: after.ready, gatewayUrl: after.cfg.gatewayApiUrl || null, reason: after.reason });
-};
-
-export const config = { path: '/api/admin/link', method: 'POST' };
+});

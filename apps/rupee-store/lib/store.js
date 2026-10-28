@@ -1,8 +1,8 @@
 import crypto from 'node:crypto';
 import { neon } from '@neondatabase/serverless';
-import { GatewayClient, deriveOrderStatus, cleanUtr } from '../../src/gateway.js';
-import { OrderStatus, nextStatus } from '../../src/status.js';
-import { PRODUCT, formatRupees } from '../../src/product.js';
+import { GatewayClient, deriveOrderStatus, cleanUtr } from '../src/gateway.js';
+import { OrderStatus, nextStatus } from '../src/status.js';
+import { PRODUCT, formatRupees } from '../src/product.js';
 
 export { PRODUCT, formatRupees, OrderStatus };
 
@@ -12,8 +12,7 @@ const MAX_OPEN_ORDERS_10_MIN = 20;
 const PAYMENT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function env(name) {
-  const fromNetlify = globalThis.Netlify?.env?.get?.(name);
-  return (fromNetlify ?? process.env[name] ?? '').trim();
+  return (process.env[name] ?? '').trim();
 }
 
 let cachedSql = null;
@@ -140,9 +139,46 @@ export async function gatewayConfig(sql) {
   return { cfg, ready: true, reason: null };
 }
 
-export function siteUrl(context) {
-  const url = env('URL') || context?.site?.url || '';
-  return url.replace(/\/+$/, '');
+/**
+ * Public address of the store, used for the customer's return link after paying. STORE_PUBLIC_URL
+ * wins (set it when you use a custom domain); otherwise Vercel's production domain; otherwise the
+ * address this request came in on.
+ */
+export function siteUrl(request) {
+  const explicit = env('STORE_PUBLIC_URL');
+  if (explicit) return explicit.replace(/\/+$/, '');
+  const vercelProd = env('VERCEL_PROJECT_PRODUCTION_URL');
+  if (vercelProd) return `https://${vercelProd.replace(/\/+$/, '')}`;
+  return new URL(request.url).origin;
+}
+
+/** Client IP as reported by the platform edge (Vercel sets x-real-ip / x-forwarded-for itself). */
+export function clientIp(request) {
+  const real = request.headers.get('x-real-ip');
+  if (real) return real.trim();
+  const forwarded = request.headers.get('x-forwarded-for');
+  return forwarded ? forwarded.split(',')[0].trim() : 'unknown';
+}
+
+/**
+ * Wraps a handler as a Vercel Function ({ fetch }) that only answers the given method(s) and turns
+ * unexpected errors into a JSON 500 without leaking details.
+ */
+export function route(methods, handler) {
+  const allowed = [].concat(methods);
+  return {
+    async fetch(request) {
+      if (!allowed.includes(request.method)) {
+        return json(405, { error: 'Method not allowed' }, { Allow: allowed.join(', ') });
+      }
+      try {
+        return await handler(request);
+      } catch (err) {
+        console.error(`[rupee-store] ${request.method} ${new URL(request.url).pathname} failed:`, err);
+        return json(500, { error: 'Internal error' });
+      }
+    }
+  };
 }
 
 // ---------------------------------------------------------------- orders

@@ -9,7 +9,7 @@ import { OrderStore, OrderStatus } from './orders.js';
 import { GatewayClient, deriveOrderStatus, verifyWebhookSignature, cleanUtr } from './gateway.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PUBLIC_DIR = path.join(__dirname, 'public');
+const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const STATIC_FILES = {
   '/': ['index.html', 'text/html; charset=utf-8'],
   '/index.html': ['index.html', 'text/html; charset=utf-8'],

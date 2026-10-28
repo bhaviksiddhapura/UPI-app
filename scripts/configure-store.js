@@ -8,8 +8,8 @@
  *
  * Usage: npm run store:configure -- --upi yourname@okhdfcbank [--name "Your Name"]
  *
- * Netlify-hosted store: add --store-url https://<site>.netlify.app --admin-token <STORE_ADMIN_TOKEN>.
- * The webhook then points at the Netlify store and the fresh credentials are sent to it over HTTPS
+ * Online store (Vercel): add --store-url https://<your-project>.vercel.app --admin-token <STORE_ADMIN_TOKEN>.
+ * The webhook then points at the online store and the fresh credentials are sent to it over HTTPS
  * (authenticated with the admin token), so they never need to be copied by hand.
  * The gateway must be running (npm run dev / npm start) when you run this.
  */
@@ -45,11 +45,11 @@ if (storeUrl) {
   try { parsed = new URL(storeUrl); } catch {}
   const localTest = parsed && ['localhost', '127.0.0.1'].includes(parsed.hostname);
   if (!parsed || (parsed.protocol !== 'https:' && !localTest)) {
-    console.error('--store-url must be the https:// address of your Netlify site');
+    console.error('--store-url must be the https:// address of your online store (e.g. https://<project>.vercel.app)');
     process.exit(1);
   }
   if (storeAdminToken.length < 32) {
-    console.error('--admin-token is required with --store-url (the STORE_ADMIN_TOKEN of the Netlify site)');
+    console.error('--admin-token is required with --store-url (the STORE_ADMIN_TOKEN set on the store)');
     process.exit(1);
   }
 }
@@ -153,7 +153,7 @@ if (storeUrl) {
     console.error(`The store refused the link (HTTP ${res.status}): ${body.error || 'unknown error'}. Fix that and run this command again.`);
     process.exit(1);
   }
-  console.log(`\n✔ Netlify store ${storeUrl} received the new merchant credentials`);
+  console.log(`\n✔ Online store ${storeUrl} received the new merchant credentials`);
   if (!body.linked) console.log(`  ${body.reason} Start the public tunnel next: npm run observer:tunnel`);
 }
 
