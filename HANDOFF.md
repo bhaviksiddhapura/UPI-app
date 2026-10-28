@@ -18,23 +18,25 @@ payment without any earlier context.
 
 ## Current status (where to resume)
 
-The owner switched to a different Vercel account (the first one was blocked by Vercel for fair-use
-limits; Netlify was out of credits). The next session should:
+**Part A is done (2026-10-28).** The store is live and verified:
 
-1. **Neon: reuse the existing database** in the connected Neon account: project
-   `one-rupee-upi-store` (`round-silence-77687197`), default branch, database `neondb`. The schema
-   from `apps/rupee-store/schema.sql` is already applied and all tables are empty. Get the pooled
-   connection string with the Neon tool (`get_connection_string`); never paste it into the repo or
-   chat. A branch `ci-test` exists for running the integration tests.
-2. **Generate fresh** `STORE_ADMIN_TOKEN` and `STORE_ENCRYPTION_KEY` (A2). Do not reuse any token
-   that appeared in an earlier chat.
-3. **Create the Vercel project** `one-rupee-upi-store` (A3: framework Other, output `public`,
-   Deployment Protection on previews only) with the three env vars as *sensitive*, and deploy the
-   contents of `apps/rupee-store` (exclude `node_modules`, `test/`, `src/__tests__/`, `dev-server.js`).
-   It can be deployed by uploading the files with the Vercel tool's create-deployment (target
-   `production`); no Git connection is needed.
-4. **Verify live** with the A4 checks, then give the owner the production URL and the admin token.
-5. The owner then runs Part B on their PC: the gateway stays on their Windows PC (their choice).
+- **Production URL:** https://one-rupee-upi-store-bhavik-21.vercel.app
+  (dashboard: https://one-rupee-upi-store-bhavik-21.vercel.app/admin.html)
+- **Vercel project:** `one-rupee-upi-store` (`prj_cDHwG1cwiYHOTzZLlTQIYUz8inAX`), framework Other,
+  output `public`, Node 22.x, functions in `sin1` (Singapore, next to the database), Vercel
+  Authentication on previews only. `DATABASE_URL`, `STORE_ADMIN_TOKEN` and `STORE_ENCRYPTION_KEY`
+  are set as *sensitive* for Production and Preview. The admin token was handed to the owner
+  privately; it is not in this repository.
+- **Deployed by file upload** (Vercel's GitHub app is not installed on this repo, so Git deploys
+  fail with `git_info_fail`). To redeploy after a code change, either upload
+  `apps/rupee-store` again (without `test/`, `src/__tests__/`, `dev-server.js`), or install the
+  Vercel GitHub app on the repo, connect it, and set Root Directory to `apps/rupee-store`.
+- **Neon:** project `one-rupee-upi-store` (`round-silence-77687197`), default branch, database
+  `neondb`, schema applied, empty. Branch `ci-test` is for the integration tests.
+- **A4 checks passed:** health `UP`/`ok`/not linked; product `ready:false` "not linked"; store page
+  and admin dashboard render (yellow banner); evil origin `403`; unsigned webhook `401`.
+
+**Next:** the owner runs Part B on their Windows PC with the production URL and admin token.
 
 ## 0. In one minute
 
