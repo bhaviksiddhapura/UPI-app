@@ -16,6 +16,26 @@ payment without any earlier context.
 
 ---
 
+## Current status (where to resume)
+
+The owner switched to a different Vercel account (the first one was blocked by Vercel for fair-use
+limits; Netlify was out of credits). The next session should:
+
+1. **Neon: reuse the existing database** in the connected Neon account: project
+   `one-rupee-upi-store` (`round-silence-77687197`), default branch, database `neondb`. The schema
+   from `apps/rupee-store/schema.sql` is already applied and all tables are empty. Get the pooled
+   connection string with the Neon tool (`get_connection_string`); never paste it into the repo or
+   chat. A branch `ci-test` exists for running the integration tests.
+2. **Generate fresh** `STORE_ADMIN_TOKEN` and `STORE_ENCRYPTION_KEY` (A2). Do not reuse any token
+   that appeared in an earlier chat.
+3. **Create the Vercel project** `one-rupee-upi-store` (A3: framework Other, output `public`,
+   Deployment Protection on previews only) with the three env vars as *sensitive*, and deploy the
+   contents of `apps/rupee-store` (exclude `node_modules`, `test/`, `src/__tests__/`, `dev-server.js`).
+   It can be deployed by uploading the files with the Vercel tool's create-deployment (target
+   `production`); no Git connection is needed.
+4. **Verify live** with the A4 checks, then give the owner the production URL and the admin token.
+5. The owner then runs Part B on their PC: the gateway stays on their Windows PC (their choice).
+
 ## 0. In one minute
 
 **Goal:** a one-page website selling one product for **₹1**. The customer pays with any UPI app
