@@ -660,6 +660,8 @@ describe('Gateway Hardening & Invariant Protection Test Suite (#23, #25, #26, #2
     const merchantId = '00000000-0000-0000-0000-000000000001';
     const dedicatedApiKey = 'mk_live_dedicated_merchant_api_key_6369';
     merchantRepo.update(merchantId, { apiKey: dedicatedApiKey });
+    const savedRequireKey = process.env.YOUPI_REQUIRE_MERCHANT_KEY;
+    delete process.env.YOUPI_REQUIRE_MERCHANT_KEY;
 
     // 1. Completely unauthenticated request naming the DEFAULT merchant -> allowed.
     //    The public one-script integration (the browser SDK) cannot carry a merchant
@@ -679,6 +681,30 @@ describe('Gateway Hardening & Invariant Protection Test Suite (#23, #25, #26, #2
       req.end();
     });
     assert.equal(unauthRes.status, 201);
+
+    // 1a. With YOUPI_REQUIRE_MERCHANT_KEY=true even the default merchant needs its key.
+    process.env.YOUPI_REQUIRE_MERCHANT_KEY = 'true';
+    try {
+      const strictRes = await new Promise((resolve, reject) => {
+        const req = http.request(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-merchant-id': merchantId }
+        }, (res) => {
+          let data = '';
+          res.on('data', c => { data += c; });
+          res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(data) }));
+        });
+        req.on('error', reject);
+        req.write(JSON.stringify({ orderId: `STRICT-${Date.now()}`, amount: '100.00' }));
+        req.end();
+      });
+      assert.equal(strictRes.status, 401);
+      assert.equal(strictRes.body.code, 'MISSING_MERCHANT_KEY');
+    } finally {
+      if (savedRequireKey === undefined) delete process.env.YOUPI_REQUIRE_MERCHANT_KEY;
+      else process.env.YOUPI_REQUIRE_MERCHANT_KEY = savedRequireKey;
+    }
+    delete process.env.YOUPI_REQUIRE_MERCHANT_KEY;
 
     // 1b. An unauthenticated request naming a DIFFERENT merchant -> 401, so an anonymous
     //     caller still cannot inject sessions into another tenant.
@@ -760,6 +786,7 @@ describe('Gateway Hardening & Invariant Protection Test Suite (#23, #25, #26, #2
       assert.equal(prodAutoRes.body.code, 'AUTOACTIVATE_FORBIDDEN');
     } finally {
       process.env.NODE_ENV = prevEnv;
+      if (savedRequireKey !== undefined) process.env.YOUPI_REQUIRE_MERCHANT_KEY = savedRequireKey;
     }
   });
 });

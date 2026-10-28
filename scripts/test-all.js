@@ -5,6 +5,7 @@ const PER_SUITE_TIMEOUT_MS = 120_000; // 2 min per suite; fails fast if a test h
 const testFiles = [
   'packages/common/src/__tests__/common.test.js',
   'packages/common/src/__tests__/gmail-redirect-port.test.js',
+  'packages/common/src/__tests__/published-secrets.test.js',
   'packages/db/src/__tests__/customer-reset.test.js',
   'packages/db/src/__tests__/auth-matrix.test.js',
   'packages/db/src/__tests__/db.test.js',
@@ -21,6 +22,7 @@ const testFiles = [
   'apps/checkout-portal/src/__tests__/checkout-portal.test.js',
   'apps/checkout-portal/src/__tests__/checkout-xss.test.js',
   'apps/coin-wallet-store/src/__tests__/coin-wallet-store.test.js',
+  'apps/rupee-store/src/__tests__/rupee-store.test.js',
   'apps/merchant-admin/src/__tests__/merchant-admin.test.js',
   'apps/payment-help/src/__tests__/payment-help.test.js',
   'apps/gmail-observer/src/__tests__/gmail-poller-stop-race.test.js',

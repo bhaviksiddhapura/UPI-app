@@ -43,6 +43,7 @@ data/backups/
 data/*.json
 !data/.gitkeep
 data/.secrets/
+data/observer-pairing.html
 berrysdk.db*
 .berry-sessions/
 

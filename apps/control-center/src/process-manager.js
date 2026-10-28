@@ -71,8 +71,20 @@ export class ProcessManager extends EventEmitter {
         pid: null
       },
       {
+        id: 'rupee-store',
+        name: 'One Rupee Store',
+        script: path.join(rootDir, 'apps/rupee-store/src/index.js'),
+        port: Number(process.env.RUPEE_STORE_PORT || 4000),
+        healthPath: '/health',
+        child: null,
+        status: 'STOPPED',
+        startTime: null,
+        pid: null
+      },
+      {
         id: 'coin-wallet-store',
         name: 'YOUPI Showcase Store (Demo)',
+        demo: true,
         script: path.join(rootDir, 'apps/coin-wallet-store/src/index.js'),
         port: Number(process.env.COIN_STORE_PORT || 5000),
         healthPath: '/health',
@@ -257,6 +269,11 @@ export class ProcessManager extends EventEmitter {
     const observerChannel = (process.env.YOUPI_OBSERVER_CHANNEL || 'ALL').toUpperCase();
     for (const svc of this.services) {
       if (svc.legacy && process.env.ENABLE_LEGACY_CHROME_OBSERVERS !== 'true') {
+        continue;
+      }
+      // The showcase store shares the default merchant's credentials with apps/rupee-store,
+      // so it only starts when asked for.
+      if (svc.demo && process.env.ENABLE_DEMO_STORE !== 'true') {
         continue;
       }
       if (svc.id === 'gmail-observer' && observerChannel === 'SMS_ONLY') {

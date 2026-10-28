@@ -106,6 +106,13 @@ export function registerPaymentRoutes(server, ctx) {
         HttpServer.json(res, 401, { error: 'Invalid order token', code: 'INVALID_ORDER_TOKEN' });
         return;
       }
+    } else if (!isAdminRequest(req) && process.env.YOUPI_REQUIRE_MERCHANT_KEY === 'true') {
+      // Server-side integrations only: nobody may open payment sessions anonymously.
+      HttpServer.json(res, 401, {
+        error: 'Merchant API key is required (X-Merchant-Key).',
+        code: 'MISSING_MERCHANT_KEY'
+      });
+      return;
     } else if (!isAdminRequest(req)) {
       // No credential was presented. The public one-script integration (the browser SDK)
       // cannot carry a merchant secret, so this path stays open - but only for the

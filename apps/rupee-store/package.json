@@ -1,0 +1,14 @@
+{
+  "name": "rupee-store",
+  "version": "1.0.0",
+  "description": "One-page store selling a single ₹1 product, paid through the self-hosted YOUPI PG gateway",
+  "type": "module",
+  "main": "./src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test src/__tests__/*.test.js"
+  },
+  "dependencies": {
+    "@youpi/common": "*"
+  }
+}

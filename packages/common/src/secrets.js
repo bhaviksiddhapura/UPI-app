@@ -11,6 +11,15 @@ const SECRETS_DIR = path.resolve(__dirname, '../../../data/.secrets');
 const cache = new Map();
 
 /**
+ * Values that were published in templates/docs. Anyone can read them, so they are never
+ * accepted as a secret: the random per-install value is used instead.
+ */
+const PUBLISHED_SECRET_VALUES = new Set([
+  'android_pairing_enrollment_secret_key_32_chars'
+]);
+const warnedPublished = new Set();
+
+/**
  * Resolves a service secret: explicit env var first, else a random value
  * generated once and persisted under data/.secrets/ (shared by all local services).
  * @param {string} name file-safe secret name
@@ -18,7 +27,14 @@ const cache = new Map();
  * @returns {string}
  */
 export function resolveSecret(name, envVar) {
-  const fromEnv = envVar ? (process.env[envVar] || '').trim() : '';
+  let fromEnv = envVar ? (process.env[envVar] || '').trim() : '';
+  if (fromEnv && PUBLISHED_SECRET_VALUES.has(fromEnv)) {
+    if (!warnedPublished.has(envVar)) {
+      warnedPublished.add(envVar);
+      console.warn(`[secrets] ${envVar} is set to a publicly known example value and is ignored; using a generated secret. Remove it from .env.`);
+    }
+    fromEnv = '';
+  }
   if (fromEnv) return fromEnv;
   if (cache.has(name)) return cache.get(name);
 
