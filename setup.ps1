@@ -48,12 +48,24 @@ if (-not (Test-Path '.env')) { Copy-Item '.env.example' '.env' }
 $credFile = 'data\.secrets\rupee_store.json'
 $upi = $null
 $storeArgs = @()
+# A saved link with a wrong token or address would otherwise be reused forever: check it, ask again if it fails.
+if (Test-Path $credFile) {
+  $saved = Get-Content $credFile -Raw | ConvertFrom-Json
+  if ($saved.storeUrl) {
+    try {
+      Invoke-RestMethod "$($saved.storeUrl)/api/admin/orders" -Headers @{ Authorization = "Bearer $($saved.storeAdminToken)" } -TimeoutSec 20 | Out-Null
+    } catch {
+      Write-Host "The saved online store link does not work ($($_.Exception.Message)). Please answer the questions again." -ForegroundColor Yellow
+      Remove-Item $credFile
+    }
+  }
+}
 if (-not (Test-Path $credFile)) {
   $upi = Read-Host 'Your UPI ID that should receive the money (e.g. yourname@okhdfcbank)'
   $payee = Read-Host 'Name shown to payers (your name or shop name)'
   $storeUrl = Read-Host 'Online store address, e.g. https://your-project.vercel.app (press Enter to run the store only on this PC)'
   if ($storeUrl) {
-    $storeToken = Read-Host 'STORE_ADMIN_TOKEN of the online store (from whoever deployed it)'
+    $storeToken = Read-Host 'STORE_ADMIN_TOKEN of the online store (64 characters, from whoever deployed it)'
     $storeArgs = @('--store-url', $storeUrl.Trim(), '--admin-token', $storeToken.Trim())
   }
   # Brings .env up to the hardened settings before the gateway starts (no gateway needed for this part).
@@ -77,7 +89,12 @@ if (-not $ok) { Write-Host 'The gateway did not come up in 60 seconds. Check the
 # 5. Connect the store to the gateway (UPI ID, webhook, fresh merchant key + webhook secret)
 if ($upi) {
   node scripts/configure-store.js --upi $upi --name $payee @storeArgs
-  if ($LASTEXITCODE -ne 0) { Write-Host 'Connecting the store failed, see the message above.' -ForegroundColor Red; return }
+  if ($LASTEXITCODE -ne 0) {
+    # Forget the half-finished link so the next run asks the questions again instead of reusing it.
+    Remove-Item $credFile -ErrorAction SilentlyContinue
+    Write-Host 'Connecting the store failed, see the message above. Run this setup again to retry.' -ForegroundColor Red
+    return
+  }
 }
 
 # 6. Public address for customers and the phone (needed for the online store and for pairing)

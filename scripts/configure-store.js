@@ -98,6 +98,34 @@ async function call(method, route, body) {
   return data;
 }
 
+/**
+ * Proves the store address and admin token work before anything is rotated, so a mistyped token
+ * fails here with a clear message instead of after the old merchant key has already been replaced.
+ */
+async function checkStore() {
+  let res;
+  try {
+    res = await fetch(`${storeUrl}/api/admin/orders`, {
+      headers: { Authorization: `Bearer ${storeAdminToken}` },
+      signal: AbortSignal.timeout(20000)
+    });
+  } catch (err) {
+    console.error(`Could not reach the store at ${storeUrl} (${err.message}). Check the address and your internet connection.`);
+    process.exit(1);
+  }
+  if (res.status === 401) {
+    console.error(`The store at ${storeUrl} did not accept the admin token. Use the exact STORE_ADMIN_TOKEN you were given`);
+    console.error('(Vercel does not show the value of a sensitive variable again once it is saved).');
+    process.exit(1);
+  }
+  if (!res.ok) {
+    console.error(`${storeUrl} does not look like the One Rupee Store (HTTP ${res.status} from /api/admin/orders). Check the address.`);
+    process.exit(1);
+  }
+}
+
+if (storeUrl) await checkStore();
+
 const envChanges = patchEnvFile();
 if (envChanges.length) {
   for (const change of envChanges) console.log(`.env: ${change}`);
