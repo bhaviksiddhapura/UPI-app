@@ -27,6 +27,10 @@ if (Test-Path (Join-Path $dir 'package.json')) {
 }
 
 npm install
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path 'node_modules\@youpi\common')) {
+  Write-Host "`nnpm install did not finish (workspace packages are not linked). Scroll up for the first npm error and send it over." -ForegroundColor Red
+  return
+}
 if (-not (Test-Path '.env')) { Copy-Item '.env.example' '.env' }
 
 Start-Job { Start-Sleep 8; Start-Process 'http://localhost:5000'; Start-Process 'http://localhost:6001' } | Out-Null
