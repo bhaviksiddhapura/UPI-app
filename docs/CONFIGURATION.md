@@ -28,6 +28,21 @@
 | `YOUPI_ALLOW_DEV_TOOLS` | unset | Developer test-mode / simulator endpoints (`/admin/dev/*`, `simulate-observation`) are refused when `NODE_ENV=production` unless this is `true` |
 | `GMAIL_REDIRECT_URI` | derived | Gmail OAuth redirect URI. Defaults to `<gmail host from your configured domain>/oauth/callback` |
 | `ANDROID_HEARTBEAT_TIMEOUT_MS` | `180000` | Inactivity window before Android device is marked DISCONNECTED |
+| `YOUPI_REQUIRE_MERCHANT_KEY` | unset (`true` in `.env.example`) | When `true`, every `POST /api/v1/payments` must carry the merchant API key (`X-Merchant-Key`); anonymous creation (browser `youpi.js` button) is refused |
+| `YOUPI_ALLOW_PRIVATE_WEBHOOKS` | unset (`true` in `.env.example`) | Allows merchant webhooks to loopback/LAN addresses, e.g. the local store at `http://127.0.0.1:4000/api/webhook` |
+| `ENABLE_DEMO_STORE` | unset | Set to `true` to also start the showcase coin store on port 5000 (it shares the default merchant's credentials with the Rupee Store) |
+| `RUPEE_STORE_PORT` | `4000` | Port of the local One Rupee Store (`apps/rupee-store`) |
+
+### One Rupee Store on Vercel (set in the Vercel project, not in `.env`)
+
+| Variable | Required | Description |
+| :--- | :--- | :--- |
+| `DATABASE_URL` | yes | Neon Postgres connection string (pooled). Added automatically when Neon is connected through the Vercel integration |
+| `STORE_ADMIN_TOKEN` | yes | 64 hex chars. Bearer token for `/admin.html` and for `store:configure` / `observer:tunnel` to link the gateway |
+| `STORE_ENCRYPTION_KEY` | yes | 64 hex chars. AES-256-GCM key for the merchant key and webhook secret stored in Neon. Changing it un-links the store until `store:configure` is run again |
+| `STORE_PUBLIC_URL` | no | Public https address of the store, if it differs from the Vercel production domain (custom domain) |
+
+See [HANDOFF.md](../HANDOFF.md) for the full deployment walkthrough.
 | `CHECKOUT_FRAME_ANCESTORS` | unset (any origin in development, `'self'` in production) | Merchant origins (comma or space separated, e.g. `https://shop.example.com`) allowed to embed `/checkout/:id`. The `youpi.js` modal is an iframe, so a store on a different origin than the checkout portal must be listed here or the browser blocks the modal. When unset, any site may frame the checkout page in development, while a production deployment (either `NODE_ENV=production` or `YOUPI_MODE=production`) fences the page to its own origin. Only bare `http(s)` origins are accepted — a path, query, embedded credential or wildcard is ignored, so the value cannot widen the CSP or inject another directive |
 | `YOUPI_ALLOW_PRIVATE_WEBHOOKS` | unset | Set to `true` to permit merchant webhook URLs on loopback/private networks. Required for self-hosted LAN targets; blocked by default as an SSRF guard |
 | `DEFAULT_APP_NAME` | `YOUPI PG` | Gateway application name displayed in checkout, merchant admin, and transaction notifications |

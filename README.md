@@ -1,3 +1,5 @@
+> **Start here:** this fork adds a one-page ₹1 UPI store (Vercel + Neon) on top of YOUPI PG. The full setup and handoff guide is **[HANDOFF.md](HANDOFF.md)**.
+
 <div align="center">
 
 ```

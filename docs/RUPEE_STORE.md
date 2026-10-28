@@ -87,78 +87,11 @@ The quick-tunnel address changes every time `observer:tunnel` restarts. Pair aga
 For a permanent address, use a named Cloudflare tunnel with your own domain (see
 `docs/DEPLOYMENT.md`).
 
-## Hosting the store on Netlify (with a Neon database)
+## Hosting the store online (Vercel + Neon)
 
-The gateway can't run on Netlify. It needs always-on processes: the WhatsApp session, 5-minute
-payment timers, webhook retries, and a server for the observer phone to report to, while Netlify
-functions stop after 60 s. So the store runs on Netlify and the gateway stays on your PC:
-
-```
-Customer ──► one-rupee-upi-store.netlify.app (static page + functions) ──► Neon Postgres
-                     │  creates payments / reads status (merchant key)          (orders, events)
-                     ▼
-           https://<tunnel>.trycloudflare.com ──► your PC: checkout portal :7000 ──► payment API :6100
-                     ▲                                                              │
-                     └──────────── signed webhook to /api/webhook ◄─────────────────┘
-```
-
-What is where:
-
-| Piece | Location |
-|---|---|
-| Store page, order API, live dashboard (`/admin.html`) | `apps/rupee-store/src/public`, `apps/rupee-store/netlify/functions` |
-| Database schema (orders, per-order event log, webhook deliveries, encrypted settings) | `apps/rupee-store/netlify/schema.sql` (already applied to the Neon project `one-rupee-upi-store`) |
-| Netlify env vars | `DATABASE_URL`, `STORE_ADMIN_TOKEN`, `STORE_ENCRYPTION_KEY` (already set on the site) |
-
-How it stays correct:
-
-- **Paid only on a verified read.** Every status change comes from an authenticated read of the
-  gateway that must match order id, payment id, amount, currency and UPI method. A webhook only
-  triggers that read. If the read fails, the webhook answers 503 and the gateway retries it.
-- **No downgrades or double use.** A paid order can never go back. A UTR can never be attached to
-  two orders (unique index); an attempt is logged as `DUPLICATE_UTR`.
-- **Nothing gets stuck.** A scheduled function re-checks open orders every minute, the dashboard
-  re-checks on every refresh, and the customer page polls until the outcome (and UTR) is known.
-- **Abuse limits.** At most 3 checkouts per client per minute and 20 open checkouts at once.
-  Each one holds a place in the gateway's one-payer-at-a-time queue.
-- **Secrets stay protected.** The merchant key and webhook secret are stored AES-256-GCM
-  encrypted. The dashboard and link endpoints need the admin token. Client IPs are stored only
-  as keyed hashes.
-
-### Linking your PC's gateway to the Netlify store (once)
-
-With the gateway running (`npm run dev`):
-
-```bash
-npm run store:configure -- --upi yourname@okhdfcbank --name "Your Name" --store-url https://one-rupee-upi-store.netlify.app --admin-token <STORE_ADMIN_TOKEN>
-```
-
-This sets your UPI ID, points the gateway's webhook at the store, issues a fresh merchant key and
-webhook secret, and sends them to the store over HTTPS. Then start the public address:
-
-```bash
-npm run observer:tunnel
-```
-
-The tunnel registers its address with the store automatically, each time it starts. Customers
-can pay only while your PC, the gateway and the tunnel are running.
-
-### Live dashboard
-
-Open `https://one-rupee-upi-store.netlify.app/admin.html` and enter the admin token. It refreshes
-every 2 seconds and shows:
-- paid today (IST) and all time,
-- open checkouts and orders needing review,
-- every order with its status and UTR,
-- an activity feed of each change.
-
-### Testing locally
-
-`npm run store:netlify-dev` serves the site and functions on http://localhost:8888, using the same
-handlers as Netlify. Set `DATABASE_URL`, `STORE_ADMIN_TOKEN` and `STORE_ENCRYPTION_KEY` in your
-environment first. The function integration tests run with
-`TEST_DATABASE_URL=<a Neon test branch> node --test apps/rupee-store/netlify/__tests__/functions.test.js`.
-They empty the tables in that database, so never point them at production.
+The online version of this store runs on Vercel with a Neon Postgres database, while the gateway
+stays on your PC. The complete setup (architecture, Neon, Vercel, linking, going live,
+troubleshooting) is in **[HANDOFF.md](../HANDOFF.md)** at the repository root.
 
 ## Your first live ₹1 payment
 
